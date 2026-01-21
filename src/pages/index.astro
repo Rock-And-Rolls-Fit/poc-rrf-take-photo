@@ -1,0 +1,173 @@
+---
+import Layout from "@/layout/Layout.astro";
+import { Button } from "@/components/ui/button";
+---
+
+<Layout title="Home">
+  <div class="flex flex-col justify-center items-center mx-auto p-4 space-y-4">
+    <div id="container" class="rounded-md overflow-hidden relative">
+      <div
+        class="border-2 border-primary rounded-md w-2/5 h-6/12 lg:w-5/12 lg:h-5/12 absolute lg:top-2/4 top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+      >
+      </div>
+      <video id="video" autoplay muted class="rounded-md"></video>
+      <div
+        id="status"
+        class="absolute text-center text-white bg-black/15 rounded-md p-2 w-full bottom-0 left-1/2 -translate-x-1/2"
+      >
+        Cargando recursos...
+      </div>
+    </div>
+    <Button
+      id="capture"
+      variant="default"
+      size="lg"
+      disabled
+      className="cursor-not-allowed">Tomar Foto</Button
+    >
+    <div>
+      <p class="font-bold">Requisitos para la foto:</p>
+      <ul class="list-disc list-inside">
+        <li>La foto debe ser tomada en un lugar claro y bien iluminado.</li>
+        <li>Tomela en un lugar quieto y sin movimiento.</li>
+        <li>
+          No uses lentes, gafas o accesorios que puedan afectar la visibilidad
+          de tu rostro.
+        </li>
+        <li>Situe su cara en el marco naranja.</li>
+        <li>El angulo de la foto debe ser de 90 grados.</li>
+      </ul>
+    </div>
+  </div>
+</Layout>
+
+<style>
+  #status {
+    margin-top: 20px;
+    font-weight: bold;
+    color: #2c3e50;
+  }
+</style>
+
+<script
+  defer
+  src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"
+></script>
+<script>
+  declare const faceapi: any;
+  const video = document.getElementById("video") as HTMLVideoElement;
+  const statusText = document.getElementById("status") as HTMLDivElement;
+  const btnCapture = document.getElementById("capture") as HTMLButtonElement;
+  const container = document.getElementById("container") as HTMLDivElement;
+
+  const mediaQuery = window.matchMedia("(width >= 48rem)");
+  console.log({ mediaQuery });
+  if (mediaQuery.matches) {
+    video.width = 640;
+    video.height = 480;
+  } else {
+    video.width = 480;
+    video.height = 640;
+  }
+
+  // 1. Cargar los modelos de face-api.js
+  // Necesitas descargar estos modelos de: https://github.com/justadudewhohacks/face-api.js/tree/master/weights
+  async function loadModels() {
+    const MODEL_URL =
+      "https://raw.githubusercontent.com/justadudewhohacks/face-api.js/master/weights";
+
+    await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+    await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
+
+    statusText.innerText = "Recursos listos. Iniciando cámara...";
+    startVideo();
+  }
+
+  // 2. Iniciar el streaming de video
+  function startVideo() {
+    navigator.mediaDevices
+      .getUserMedia({ video: {} })
+      .then((stream) => {
+        video.srcObject = stream;
+        statusText.innerText = "Posiciónate frente a la cámara";
+      })
+      .catch((err) => console.error("Error al acceder a la cámara:", err));
+  }
+
+  // 3. Detección en tiempo real
+  video.addEventListener("play", () => {
+    const canvas = faceapi.createCanvasFromMedia(video) as HTMLCanvasElement;
+    container.append(canvas);
+    const displaySize = { width: video.width, height: video.height };
+    faceapi.matchDimensions(canvas, displaySize);
+
+    canvas.id = "canvas";
+    canvas.style.position = "absolute";
+    canvas.style.top = "0px";
+    canvas.style.left = "0px";
+    canvas.style.borderRadius = "10px";
+    canvas.width = video.width;
+    canvas.height = video.height;
+
+    container.style.width = video.width + "px";
+    container.style.height = video.height + "px";
+
+    setInterval(async () => {
+      // Usamos TinyFaceDetector para que sea fluido en web
+      const detections = await faceapi
+        .detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks();
+
+      const resizedDetections = faceapi.resizeResults(detections, displaySize);
+      canvas.getContext("2d")?.clearRect(0, 0, canvas.width, canvas.height);
+      faceapi.draw.drawDetections(canvas, resizedDetections);
+
+      if (detections.length === 1) {
+        const score = detections[0].detection.score;
+        if (score > 0.9) {
+          statusText.innerText =
+            "Rostro detectado correctamente. Presiona el botón para tomar la foto.";
+          statusText.style.color = "green";
+          btnCapture.disabled = false;
+          btnCapture.classList.remove("cursor-not-allowed");
+          btnCapture.classList.add("cursor-pointer");
+          return;
+        }
+      }
+      statusText.innerText =
+        "Rostro no detectado. Centra tu rostro en el marco naranja.";
+      statusText.style.color = "red";
+      btnCapture.disabled = true;
+      btnCapture.classList.remove("cursor-pointer");
+      btnCapture.classList.add("cursor-not-allowed");
+    }, 1000);
+  });
+
+  btnCapture.addEventListener("click", () => {
+    // Crear un canvas temporal para capturar el frame del video
+    const captureCanvas = document.createElement("canvas");
+    captureCanvas.width = video.videoWidth;
+    captureCanvas.height = video.videoHeight;
+    const ctx = captureCanvas.getContext("2d");
+    
+    if (ctx) {
+      // Dibujar el frame actual del video en el canvas
+      ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+      
+      // Convertir a Base64
+      const photoB64 = captureCanvas.toDataURL("image/jpeg", 0.9);
+      
+      // Guardar en sessionStorage para la página de preview
+      sessionStorage.setItem("photoBase64", photoB64);
+      
+      // Feedback visual
+      btnCapture.disabled = true;
+      btnCapture.innerText = "Capturando...";
+      
+      // Redirigir a la página de preview
+      window.location.href = "/preview";
+    }
+  });
+
+  loadModels();
+</script>
