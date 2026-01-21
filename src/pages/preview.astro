@@ -55,7 +55,7 @@ import { Button } from "@/components/ui/button";
 
       const data = await response.json();
 
-      if (!data.success) {
+      if (data.status !== "ok") {
         console.error("Error uploading photo:", data.error);
         statusText.style.color = "red";
         statusText.innerText = data.message;
